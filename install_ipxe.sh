@@ -3,7 +3,7 @@
 # ==============================================================================
 # Script para Instalação e Configuração de Servidor iPXE no Debian 12
 #
-# Autor: Seu Nome/Empresa
+# Autor: Paulo/Esc Suporte
 # Versão: 1.5 - Download automático do Memtest86+
 #
 # Descrição:
