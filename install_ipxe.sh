@@ -3,7 +3,7 @@
 # ==============================================================================
 # Script para Instalação e Configuração de Servidor iPXE no Debian 12
 #
-# Autor: Paulo/Esc Informática
+# Autor: Paulo/Esc Informática 
 # Versão: 1.7 - Correção do link do Memtest86+ e método de extração
 #
 # Descrição:
@@ -141,7 +141,7 @@ wget -q "$WIMBOOT_URL" -O "${IPXE_WEB_DIR}/wimboot" || print_error "Falha ao bai
 print_success "wimboot baixado com sucesso."
 
 # 4.2 Baixar e extrair Memtest86+
-MEMTEST_ZIP_URL="https://www.memtest86.com/downloads/memtest86-usb.zip"
+MEMTEST_ZIP_URL="https://www.memtest.org/download/v7.00/mt86plus_7.00.zip"
 print_info "Baixando e extraindo a versão mais recente do Memtest86+..."
 wget -q "$MEMTEST_ZIP_URL" -O "/tmp/memtest.zip" || print_error "Falha ao baixar Memtest86+."
 unzip -o /tmp/memtest.zip -d /tmp/memtest_extracted >/dev/null 2>&1 || print_error "Falha ao extrair o ZIP do Memtest."
