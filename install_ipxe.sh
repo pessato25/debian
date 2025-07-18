@@ -3,20 +3,20 @@
 # ==============================================================================
 # Script para Instalação e Configuração de Servidor iPXE no Debian 12
 #
-# Autor: Paulo/Esc Suporte
-# Versão: 1.5 - Download automático do Memtest86+
+# Autor: Paulo/Esc Informática
+# Versão: 1.7 - Correção do link do Memtest86+ e método de extração
 #
 # Descrição:
 # Este script automatiza a instalação de um servidor de boot via rede (PXE/iPXE)
 # para carregar instaladores do Windows, um ambiente Ubuntu Live e diversas
-# ferramentas de manutenção baseadas em WinPE.
-# Utiliza: isc-dhcp-server, tftpd-hpa, nginx, samba, ipxe e wimboot.
+# ferramentas de manutenção.
+# Utiliza: isc-dhcp-server, tftpd-hpa, nginx, samba, ipxe, wimboot, p7zip e unzip.
 #
 # Pré-requisitos:
 #   - Executar como root ou com privilégios de sudo.
 #   - Uma instalação limpa do Debian 12.
 #   - O servidor deve ter um endereço IP estático configurado.
-#   - Imagens ISO das ferramentas e sistemas operacionais desejados.
+#   - Imagens ISO das ferramentas e sistemas operacionais desejados (exceto as automatizadas).
 # ==============================================================================
 
 # --- Verificação de Root ---
@@ -89,7 +89,7 @@ fi
 print_info "Atualizando o sistema e instalando pacotes necessários..."
 apt-get update >/dev/null 2>&1
 apt-get upgrade -y >/dev/null 2>&1
-apt-get install -y isc-dhcp-server tftpd-hpa nginx ipxe wget samba || print_error "Falha ao instalar pacotes."
+apt-get install -y isc-dhcp-server tftpd-hpa nginx ipxe wget samba p7zip-full unzip || print_error "Falha ao instalar pacotes."
 print_success "Pacotes instalados."
 
 # 2. Configuração do Servidor DHCP (isc-dhcp-server)
@@ -140,13 +140,27 @@ print_info "Baixando wimboot..."
 wget -q "$WIMBOOT_URL" -O "${IPXE_WEB_DIR}/wimboot" || print_error "Falha ao baixar wimboot."
 print_success "wimboot baixado com sucesso."
 
-# 4.2 Baixar Memtest86+
-MEMTEST_URL="https://www.memtest.org/download/v7.00/mt86plus_7.00_64.bin"
-print_info "Baixando a versão mais recente do Memtest86+..."
-wget -q "$MEMTEST_URL" -O "${MEMTEST_DIR}/memtest.bin" || print_error "Falha ao baixar Memtest86+."
-print_success "Memtest86+ baixado com sucesso."
+# 4.2 Baixar e extrair Memtest86+
+MEMTEST_ZIP_URL="https://www.memtest86.com/downloads/memtest86-usb.zip"
+print_info "Baixando e extraindo a versão mais recente do Memtest86+..."
+wget -q "$MEMTEST_ZIP_URL" -O "/tmp/memtest.zip" || print_error "Falha ao baixar Memtest86+."
+unzip -o /tmp/memtest.zip -d /tmp/memtest_extracted >/dev/null 2>&1 || print_error "Falha ao extrair o ZIP do Memtest."
+find /tmp/memtest_extracted -name "*.bin" -exec mv {} "${MEMTEST_DIR}/memtest.bin" \;
+if [ ! -f "${MEMTEST_DIR}/memtest.bin" ]; then
+    print_error "Falha ao encontrar o ficheiro .bin do Memtest após a extração."
+fi
+rm -rf /tmp/memtest.zip /tmp/memtest_extracted
+print_success "Memtest86+ baixado e extraído com sucesso."
 
-# 4.3 Configurar Samba para compartilhar os arquivos de instalação
+# 4.3 Baixar e extrair Hiren's BootCD PE
+HIRENS_ISO_URL="https://www.hirensbootcd.org/files/HBCD_PE_x64.iso"
+print_info "Baixando e extraindo Hiren's BootCD PE (pode demorar)..."
+wget --progress=bar:force "$HIRENS_ISO_URL" -O "/tmp/Hiren.iso" || print_error "Falha ao baixar Hiren's BootCD PE."
+7z x /tmp/Hiren.iso -o"${HIRENS_DIR}" >/dev/null 2>&1 || print_error "Falha ao extrair Hiren's BootCD PE."
+rm /tmp/Hiren.iso
+print_success "Hiren's BootCD PE baixado e extraído."
+
+# 4.4 Configurar Samba para compartilhar os arquivos de instalação
 print_info "Configurando o compartilhamento Samba..."
 SAMBA_CONFIG_FILE="/etc/samba/smb.conf"
 cp "$SAMBA_CONFIG_FILE" "${SAMBA_CONFIG_FILE}.bak"
@@ -161,7 +175,7 @@ cat >> "$SAMBA_CONFIG_FILE" <<EOF
 EOF
 print_success "Compartilhamento Samba 'install' configurado para ${IPXE_WEB_DIR}."
 
-# 4.4 Criar o script de menu principal do iPXE
+# 4.5 Criar o script de menu principal do iPXE
 IPXE_MENU_FILE="${IPXE_WEB_DIR}/menu.ipxe"
 cat > "$IPXE_MENU_FILE" <<EOF
 #!ipxe
@@ -280,7 +294,7 @@ print_success "Serviços reiniciados e habilitados na inicialização."
 echo
 print_success "Instalação do servidor iPXE concluída!"
 echo "---------------------------------------------------------------------"
-echo -e "\e[1;33m[AÇÃO NECESSÁRIA]\e[0m Para as opções de boot funcionarem, copie os arquivos das ISOs:"
+echo -e "\e[1;33m[AÇÃO NECESSÁRIA]\e[0m Para as opções de boot restantes funcionarem, copie os arquivos das ISOs:"
 echo ""
 echo -e "\e[1;32mPara o INSTALADOR DO WINDOWS 11:\e[0m"
 echo "1. Monte a ISO: sudo mount -o loop /caminho/para/windows11.iso /mnt"
@@ -295,11 +309,6 @@ echo ""
 echo -e "\e[1;32mPara o UBUNTU LIVE:\e[0m"
 echo "1. Monte a ISO: sudo mount -o loop /caminho/para/ubuntu-live.iso /mnt"
 echo "2. Copie os arquivos: sudo cp -r /mnt/* ${UBUNTU_LIVE_DIR}/"
-echo "3. Desmonte a ISO: sudo umount /mnt"
-echo ""
-echo -e "\e[1;32mPara o HIREN'S BOOTCD PE:\e[0m"
-echo "1. Monte a ISO: sudo mount -o loop /caminho/para/Hiren's.iso /mnt"
-echo "2. Copie os arquivos: sudo cp -r /mnt/* ${HIRENS_DIR}/"
 echo "3. Desmonte a ISO: sudo umount /mnt"
 echo ""
 echo -e "\e[1;32mPara o MINITOOL PARTITION WIZARD:\e[0m"
@@ -317,7 +326,10 @@ echo "1. Monte a ISO: sudo mount -o loop /caminho/para/Aomei.iso /mnt"
 echo "2. Copie os arquivos: sudo cp -r /mnt/* ${AOMEI_DIR}/"
 echo "3. Desmonte a ISO: sudo umount /mnt"
 echo ""
-echo "NOTA: A estrutura de arquivos dentro das ISOs de ferramentas pode variar."
+echo "NOTA SOBRE AOMEI: A ISO de boot do AOMEI Backupper deve ser criada por si,"
+echo "usando o software da AOMEI numa máquina Windows, antes de poder copiar os ficheiros."
+echo ""
+echo "NOTA GERAL: A estrutura de arquivos dentro das ISOs de ferramentas pode variar."
 echo "O script assume a estrutura padrão (boot/bcd, boot/boot.sdi, sources/boot.wim)."
 echo "Se uma ferramenta não funcionar, verifique os caminhos dentro da ISO e ajuste o menu.ipxe."
 echo "---------------------------------------------------------------------"
