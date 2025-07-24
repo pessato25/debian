@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # ==============================================================================
-# Script para Instalação e Configuração de Servidor iPXE no Debian 12
+# Script para Instalação e Configuração de Servidor iPXE no Ubuntu Server
 #
-# Autor: Paulo/Esc Informática 
-# Versão: 1.7 - Correção do link do Memtest86+ e método de extração
+# Autor: Paulo/Esc Informáica
+# Versão: 2.0 - Adaptado para Ubuntu Server com verificações de status
 #
 # Descrição:
 # Este script automatiza a instalação de um servidor de boot via rede (PXE/iPXE)
@@ -14,7 +14,7 @@
 #
 # Pré-requisitos:
 #   - Executar como root ou com privilégios de sudo.
-#   - Uma instalação limpa do Debian 12.
+#   - Uma instalação limpa do Ubuntu Server (20.04, 22.04, etc.).
 #   - O servidor deve ter um endereço IP estático configurado.
 #   - Imagens ISO das ferramentas e sistemas operacionais desejados (exceto as automatizadas).
 # ==============================================================================
@@ -69,10 +69,21 @@ print_error() {
   exit 1
 }
 
+check_service_status() {
+    local service_name=$1
+    print_info "Verificando o status do serviço ${service_name}..."
+    sleep 2 # Dá um momento para o serviço iniciar
+    if systemctl is-active --quiet "$service_name"; then
+        print_success "Serviço ${service_name} está ativo e a funcionar."
+    else
+        print_error "O serviço ${service_name} falhou ao iniciar. Verifique os logs com 'journalctl -u ${service_name}'."
+    fi
+}
+
 # --- Início da Instalação ---
 
 clear
-print_info "Iniciando a instalação do servidor iPXE com Ferramentas de Manutenção..."
+print_info "Iniciando a instalação do servidor iPXE no Ubuntu Server..."
 echo "--------------------------------------------------"
 echo "IP do Servidor detectado: ${SERVER_IP}"
 echo "Interface de Rede detectada: ${SERVER_INTERFACE}"
@@ -86,6 +97,7 @@ if [[ ! "$confirm" =~ ^[sS]$ ]]; then
 fi
 
 # 1. Atualização do Sistema e Instalação de Pacotes
+export DEBIAN_FRONTEND=noninteractive
 print_info "Atualizando o sistema e instalando pacotes necessários..."
 apt-get update >/dev/null 2>&1
 apt-get upgrade -y >/dev/null 2>&1
@@ -123,7 +135,7 @@ print_info "Configurando o servidor TFTP..."
 TFTP_CONFIG_FILE="/etc/default/tftpd-hpa"
 sed -i "s|TFTP_DIRECTORY=\".*\"|TFTP_DIRECTORY=\"${TFTP_ROOT}\"|" "$TFTP_CONFIG_FILE"
 sed -i "s/TFTP_OPTIONS=\".*\"/TFTP_OPTIONS=\"--secure --create\"/" "$TFTP_CONFIG_FILE"
-mkdir -p "$TFTP_ROOT"
+mkdir -p "$TFTP_ROOT" || print_error "Falha ao criar diretório TFTP."
 cp /usr/lib/ipxe/undionly.kpxe "$TFTP_ROOT/"
 cp /usr/lib/ipxe/ipxe.efi "$TFTP_ROOT/"
 print_success "Servidor TFTP configurado."
@@ -131,13 +143,14 @@ print_success "Servidor TFTP configurado."
 # 4. Configuração do Servidor Web (Nginx), Samba e Menu iPXE
 print_info "Configurando Nginx, Samba e criando o menu iPXE..."
 # Cria todos os diretórios necessários
-mkdir -p "$IPXE_WEB_DIR" "$WIN10_FILES_DIR" "$WIN11_FILES_DIR" "$UBUNTU_LIVE_DIR"
-mkdir -p "$HIRENS_DIR" "$MINITOOL_DIR" "$ACTIVEBOOT_DIR" "$AOMEI_DIR" "$MEMTEST_DIR"
+mkdir -p "$IPXE_WEB_DIR" "$WIN10_FILES_DIR" "$WIN11_FILES_DIR" "$UBUNTU_LIVE_DIR" || print_error "Falha ao criar diretórios de SO."
+mkdir -p "$HIRENS_DIR" "$MINITOOL_DIR" "$ACTIVEBOOT_DIR" "$AOMEI_DIR" "$MEMTEST_DIR" || print_error "Falha ao criar diretórios de ferramentas."
 
 # 4.1 Baixar wimboot
 WIMBOOT_URL="https://github.com/ipxe/wimboot/releases/latest/download/wimboot"
 print_info "Baixando wimboot..."
 wget -q "$WIMBOOT_URL" -O "${IPXE_WEB_DIR}/wimboot" || print_error "Falha ao baixar wimboot."
+[ ! -f "${IPXE_WEB_DIR}/wimboot" ] && print_error "Download do wimboot falhou (ficheiro não encontrado)."
 print_success "wimboot baixado com sucesso."
 
 # 4.2 Baixar e extrair Memtest86+
@@ -158,6 +171,7 @@ print_info "Baixando e extraindo Hiren's BootCD PE (pode demorar)..."
 wget --progress=bar:force "$HIRENS_ISO_URL" -O "/tmp/Hiren.iso" || print_error "Falha ao baixar Hiren's BootCD PE."
 7z x /tmp/Hiren.iso -o"${HIRENS_DIR}" >/dev/null 2>&1 || print_error "Falha ao extrair Hiren's BootCD PE."
 rm /tmp/Hiren.iso
+[ ! -f "${HIRENS_DIR}/sources/boot.wim" ] && print_error "Extração do Hiren's falhou (boot.wim não encontrado)."
 print_success "Hiren's BootCD PE baixado e extraído."
 
 # 4.4 Configurar Samba para compartilhar os arquivos de instalação
@@ -173,7 +187,9 @@ cat >> "$SAMBA_CONFIG_FILE" <<EOF
     read only = yes
     guest ok = yes
 EOF
-print_success "Compartilhamento Samba 'install' configurado para ${IPXE_WEB_DIR}."
+print_info "Verificando a sintaxe da configuração do Samba..."
+testparm -s >/dev/null 2>&1 || print_error "Configuração do Samba inválida. Verifique /etc/samba/smb.conf"
+print_success "Compartilhamento Samba configurado e verificado."
 
 # 4.5 Criar o script de menu principal do iPXE
 IPXE_MENU_FILE="${IPXE_WEB_DIR}/menu.ipxe"
@@ -276,23 +292,28 @@ reboot
 EOF
 print_success "Menu iPXE criado em ${IPXE_MENU_FILE}"
 
-# 5. Reiniciar os Serviços
+# 5. Reiniciar e Verificar os Serviços
 print_info "Reiniciando e habilitando os serviços..."
-systemctl restart isc-dhcp-server || print_error "Falha ao reiniciar o serviço DHCP."
-systemctl restart tftpd-hpa || print_error "Falha ao reiniciar o serviço TFTP."
-systemctl restart nginx || print_error "Falha ao reiniciar o serviço Nginx."
-systemctl restart smbd nmbd || print_error "Falha ao reiniciar os serviços do Samba."
+systemctl restart isc-dhcp-server
+systemctl restart tftpd-hpa
+systemctl restart nginx
+systemctl restart smbd nmbd
 
-systemctl enable isc-dhcp-server
-systemctl enable tftpd-hpa
-systemctl enable nginx
-systemctl enable smbd nmbd
+systemctl enable isc-dhcp-server >/dev/null 2>&1
+systemctl enable tftpd-hpa >/dev/null 2>&1
+systemctl enable nginx >/dev/null 2>&1
+systemctl enable smbd nmbd >/dev/null 2>&1
+print_success "Serviços habilitados na inicialização."
 
-print_success "Serviços reiniciados e habilitados na inicialização."
+# Verificação final do status dos serviços
+check_service_status isc-dhcp-server
+check_service_status tftpd-hpa
+check_service_status nginx
+check_service_status smbd
 
 # --- Fim da Instalação ---
 echo
-print_success "Instalação do servidor iPXE concluída!"
+print_success "Instalação do servidor iPXE no Ubuntu Server concluída!"
 echo "---------------------------------------------------------------------"
 echo -e "\e[1;33m[AÇÃO NECESSÁRIA]\e[0m Para as opções de boot restantes funcionarem, copie os arquivos das ISOs:"
 echo ""
